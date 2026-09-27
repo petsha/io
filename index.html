@@ -114,6 +114,16 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);
   padding:9px 18px;border-radius:20px;font-size:13px;z-index:100;bottom:calc(20px + env(safe-area-inset-bottom,0px));}
 
+/* lock screen */
+#lockscreen{position:fixed;inset:0;background:var(--bg);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;}
+.lockcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px 26px;max-width:340px;width:100%;}
+.lockcard h2{margin-bottom:4px;}
+.lockcard .lockdesc{color:var(--ink-dim);font-size:13px;margin-bottom:18px;}
+.lockcard .field{margin-bottom:12px;}
+.lockerr{color:var(--bad);font-size:13px;margin:-4px 0 12px;min-height:1em;}
+.lockcard .btn{width:100%;}
+.lockcard .lockalt{background:none;border:none;color:var(--ink-dim);font-size:12px;margin-top:14px;text-decoration:underline;width:100%;text-align:center;}
+
 /* printable receipt */
 #printarea{display:none;}
 @media print{
@@ -134,6 +144,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 </style>
 </head>
 <body>
+<div id="lockscreen"></div>
 <div id="mobiletop"></div>
 <div id="app">
   <nav id="side"></nav>
@@ -171,6 +182,86 @@ function fmt(n){ n=Number(n||0); return 'R '+n.toLocaleString('en-ZA',{minimumFr
 function today(){ return new Date().toISOString().slice(0,10); }
 function monthKey(d){ return (d||'').slice(0,7); }
 function itemsTotal(items){ return (items||[]).reduce((s,i)=>s+(Number(i.price)||0)*(Number(i.qty)||1),0); }
+
+/* ---------- login ---------- */
+const PW_KEY='kieltec_pw_v1';
+const SESSION_KEY='kieltec_unlocked_v1';
+async function sha256Hex(text){
+  const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function randomSalt(){ return Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join(''); }
+function getPwRecord(){ try{ return JSON.parse(localStorage.getItem(PW_KEY)||'null'); }catch(e){ return null; } }
+function setPwRecord(rec){ localStorage.setItem(PW_KEY, JSON.stringify(rec)); }
+async function checkPassword(pw){
+  const rec=getPwRecord(); if(!rec) return false;
+  return (await sha256Hex(rec.salt+pw))===rec.hash;
+}
+async function setPassword(pw){
+  const salt=randomSalt();
+  setPwRecord({salt, hash:await sha256Hex(salt+pw)});
+}
+function isUnlocked(){ return sessionStorage.getItem(SESSION_KEY)==='1'; }
+function markUnlocked(){ sessionStorage.setItem(SESSION_KEY,'1'); }
+function lockApp(){ sessionStorage.removeItem(SESSION_KEY); showLock(); }
+
+function showLock(){
+  document.getElementById('app').style.display='none';
+  document.getElementById('mobiletop').style.display='none';
+  const ls=document.getElementById('lockscreen');
+  ls.style.display='flex';
+  const hasPw=!!getPwRecord();
+  if(hasPw) renderLoginForm(ls); else renderSetupForm(ls);
+}
+function hideLock(){
+  document.getElementById('lockscreen').style.display='none';
+  document.getElementById('app').style.display='';
+  document.getElementById('mobiletop').style.display='';
+}
+function renderSetupForm(ls){
+  ls.innerHTML=`<div class="lockcard">
+    <h2>Set a shop password</h2>
+    <div class="lockdesc">Choose a password to lock ${escapeHtml((state&&state.settings&&state.settings.name)||'Kieltec')}. Anyone opening this browser will need it.</div>
+    <div class="field"><label>Password</label><input id="lp_pw1" type="password" autocomplete="new-password"></div>
+    <div class="field"><label>Confirm password</label><input id="lp_pw2" type="password" autocomplete="new-password"></div>
+    <div class="lockerr" id="lp_err"></div>
+    <button class="btn" id="lp_setBtn">Set password</button>
+  </div>`;
+  const go=async ()=>{
+    const p1=document.getElementById('lp_pw1').value, p2=document.getElementById('lp_pw2').value;
+    const err=document.getElementById('lp_err');
+    if(p1.length<4){ err.textContent='Use at least 4 characters.'; return; }
+    if(p1!==p2){ err.textContent='Passwords do not match.'; return; }
+    await setPassword(p1); markUnlocked(); hideLock(); render();
+  };
+  document.getElementById('lp_setBtn').onclick=go;
+  ls.querySelectorAll('input').forEach(i=>i.addEventListener('keydown',e=>{ if(e.key==='Enter') go(); }));
+  document.getElementById('lp_pw1').focus();
+}
+function renderLoginForm(ls){
+  ls.innerHTML=`<div class="lockcard">
+    <h2>${escapeHtml((state&&state.settings&&state.settings.name)||'Kieltec')}</h2>
+    <div class="lockdesc">Enter the shop password to continue.</div>
+    <div class="field"><label>Password</label><input id="lp_pw" type="password" autocomplete="current-password"></div>
+    <div class="lockerr" id="lp_err"></div>
+    <button class="btn" id="lp_goBtn">Unlock</button>
+    <button class="lockalt" id="lp_forgot" type="button">Forgot password?</button>
+  </div>`;
+  const go=async ()=>{
+    const pw=document.getElementById('lp_pw').value;
+    const err=document.getElementById('lp_err');
+    if(await checkPassword(pw)){ markUnlocked(); hideLock(); render(); }
+    else { err.textContent='Incorrect password.'; document.getElementById('lp_pw').value=''; document.getElementById('lp_pw').focus(); }
+  };
+  document.getElementById('lp_goBtn').onclick=go;
+  document.getElementById('lp_pw').addEventListener('keydown',e=>{ if(e.key==='Enter') go(); });
+  document.getElementById('lp_forgot').onclick=()=>{
+    if(confirm('This resets the shop password only (your bookings, quotes, invoices and customers stay safe). Continue?')){
+      localStorage.removeItem(PW_KEY); showLock();
+    }
+  };
+  document.getElementById('lp_pw').focus();
+}
 
 /* ---------- theme ---------- */
 if(state.theme==='dark'||state.theme==='light') document.documentElement.setAttribute('data-theme', state.theme);
@@ -219,6 +310,11 @@ function renderNav(){
   themeBtn.textContent='Theme: '+(state.theme==='auto'?'Auto':state.theme==='dark'?'Dark':'Light');
   themeBtn.onclick=toggleTheme;
   side.appendChild(themeBtn);
+  const lockBtn=document.createElement('button');
+  lockBtn.className='themebtn'; lockBtn.style.marginTop='8px'; lockBtn.style.width='100%';
+  lockBtn.textContent='🔒 Lock';
+  lockBtn.onclick=lockApp;
+  side.appendChild(lockBtn);
 
   const m=document.getElementById('mobiletop');
   m.innerHTML='';
@@ -228,6 +324,9 @@ function renderNav(){
     b.onclick=()=>{ location.hash='#'+id; };
     m.appendChild(b);
   });
+  const mLock=document.createElement('button');
+  mLock.textContent='🔒'; mLock.onclick=lockApp;
+  m.appendChild(mLock);
 }
 
 function escapeHtml(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -827,6 +926,11 @@ function renderSettings(main){
   <div class="toolbar" style="margin-top:16px"><button class="btn" id="saveSettings">Save settings</button></div>
   </div>
   <div class="card">
+    <h3>Security</h3>
+    <div style="color:var(--ink-dim);font-size:13px;margin-bottom:10px">Change the password required to open this app on this browser.</div>
+    <div class="toolbar"><button class="btn ghost" id="changePwBtn">Change password</button></div>
+  </div>
+  <div class="card">
     <h3>Your data</h3>
     <div style="color:var(--ink-dim);font-size:13px;margin-bottom:10px">Everything is stored only in this browser (localStorage) — nothing is sent anywhere. Back up regularly by exporting.</div>
     <div class="toolbar">
@@ -861,9 +965,30 @@ function renderSettings(main){
     if(!confirm('This deletes everything stored in this browser. Export a backup first if you want to keep it. Continue?')) return;
     state=defaultState(); save(); render();
   };
+  document.getElementById('changePwBtn').onclick=openChangePwForm;
+}
+function openChangePwForm(){
+  const modalRoot=document.getElementById('modalroot');
+  modalRoot.innerHTML=`<div class="modal-bg" id="mbg"><div class="modal" style="max-width:380px">
+    <h2>Change password</h2>
+    <div class="field"><label>Current password</label><input id="cp_old" type="password" autocomplete="current-password"></div>
+    <div class="field"><label>New password</label><input id="cp_new1" type="password" autocomplete="new-password"></div>
+    <div class="field"><label>Confirm new password</label><input id="cp_new2" type="password" autocomplete="new-password"></div>
+    <div class="lockerr" id="cp_err"></div>
+    <div class="toolbar" style="margin-top:10px"><button class="btn" id="cp_saveBtn">Save</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div>
+  </div></div>`;
+  document.getElementById('mbg').addEventListener('click',e=>{ if(e.target.id==='mbg') closeModal(); });
+  document.getElementById('cp_saveBtn').onclick=async ()=>{
+    const oldPw=document.getElementById('cp_old').value, n1=document.getElementById('cp_new1').value, n2=document.getElementById('cp_new2').value;
+    const err=document.getElementById('cp_err');
+    if(!(await checkPassword(oldPw))){ err.textContent='Current password is incorrect.'; return; }
+    if(n1.length<4){ err.textContent='Use at least 4 characters.'; return; }
+    if(n1!==n2){ err.textContent='New passwords do not match.'; return; }
+    await setPassword(n1); closeModal(); toast('Password changed');
+  };
 }
 
-render();
+if(isUnlocked() && getPwRecord()){ render(); } else { showLock(); }
 </script>
 </body>
 </html>
