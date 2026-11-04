@@ -130,9 +130,23 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
   .pr-photos img{width:150px;height:150px;object-fit:cover;border:1px solid #999;}
   .pr-photos figcaption{font-size:11px;color:#333;margin-top:2px;}
 }
+
+/* ---------- widget-style home ---------- */
+.wgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:12px 0}
+@media (min-width:900px){.wgrid{grid-template-columns:repeat(4,1fr)}}
+.wgt{--c:var(--accent);position:relative;overflow:hidden;text-align:left;display:flex;flex-direction:column;gap:2px;min-height:118px;padding:14px;border-radius:22px;
+  border:1px solid color-mix(in srgb,var(--c) 40%,var(--line));background:linear-gradient(150deg,color-mix(in srgb,var(--c) 30%,var(--panel)),var(--panel) 78%);
+  color:var(--ink);box-shadow:0 6px 18px rgba(0,0,0,.12);transition:transform .12s,box-shadow .12s;cursor:pointer;font:inherit;width:100%}
+.wgt:active{transform:scale(.96);box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.wgt .wi{font-size:24px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:14px;background:color-mix(in srgb,var(--c) 28%,transparent);margin-bottom:8px}
+.wgt .wn{font-family:var(--mono);font-size:22px;font-weight:700;line-height:1.1}
+.wgt .wn.sm{font-size:16px}
+.wgt .wl{font-size:13px;font-weight:600;margin-top:2px}
+.wgt .ws{font-size:11px;color:var(--ink-dim)}
+.wgreet{margin:4px 0 0}
 </style>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#C97A2B">
+<meta name="theme-color" content="#15171A">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -454,19 +468,28 @@ function render(){
 
 /* ---------- dashboard ---------- */
 function renderDashboard(main){
-  const mk=monthKey(today());
-  const incomeThisMonth = state.invoices.filter(i=>monthKey(i.date)===mk).reduce((s,i)=>s+itemsTotal(i.items),0);
-  const outstanding = state.invoices.filter(i=>!i.paid).reduce((s,i)=>s+itemsTotal(i.items),0);
-  const expensesThisMonth = state.expenses.filter(e=>monthKey(e.date)===mk).reduce((s,e)=>s+Number(e.amount||0),0);
-  const openBookings = state.bookings.filter(b=>!b.paid).length;
-
+  const mk=monthKey(today()), tot=i=>itemsTotal(i.items), inv=state.invoices;
+  const invoicedMonth=inv.filter(i=>monthKey(i.date)===mk).reduce((s,i)=>s+tot(i),0);
+  const paidMonth=inv.filter(i=>monthKey(i.date)===mk&&i.paid).reduce((s,i)=>s+tot(i),0);
+  const unpaidList=inv.filter(i=>!i.paid), outstanding=unpaidList.reduce((s,i)=>s+tot(i),0);
+  const expMonth=state.expenses.filter(e=>monthKey(e.date)===mk).reduce((s,e)=>s+Number(e.amount||0),0);
+  const openBookings=state.bookings.filter(b=>!b.paid).length;
+  const hr=new Date().getHours(), greet=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
+  const dateTxt=new Date().toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'});
+  const W=(route,icon,color,num,label,sub,sm)=>`<button class="wgt" style="--c:${color}" onclick="location.hash='#${route}'"><span class="wi">${icon}</span>${num!==''?`<span class="wn${sm?' sm':''}">${num}</span>`:''}<span class="wl">${label}</span>${sub?`<span class="ws">${sub}</span>`:''}</button>`;
   main.innerHTML = `
-  <header class="top"><div><h1>Dashboard</h1><div style="color:var(--ink-dim);font-size:13px">Overview of the workshop, updated live from your records.</div></div></header>
-  <div class="grid stat-grid">
-    <div class="stat"><div class="num">${fmt(incomeThisMonth)}</div><div class="lbl">Invoiced this month</div></div>
-    <div class="stat"><div class="num">${fmt(outstanding)}</div><div class="lbl">Outstanding (unpaid invoices)</div></div>
-    <div class="stat"><div class="num">${fmt(expensesThisMonth)}</div><div class="lbl">Expenses this month</div></div>
-    <div class="stat"><div class="num">${openBookings}</div><div class="lbl">Open bookings (unpaid)</div></div>
+  <header class="top"><div><h1 class="wgreet">${greet}</h1><div style="color:var(--ink-dim);font-size:13px">${dateTxt}</div></div></header>
+  <div class="wgrid">
+    ${W('reports','📈','#22C55E',fmt(invoicedMonth),'Invoiced this month',fmt(paidMonth)+' paid',1)}
+    ${W('invoices','⏳','#EF4444',fmt(outstanding),'Outstanding',unpaidList.length+' unpaid invoice'+(unpaidList.length===1?'':'s'),1)}
+    ${W('bookings','🧾','#3B82F6',openBookings,'Bookings','open · '+state.bookings.length+' total')}
+    ${W('quotes','📋','#8B5CF6',state.quotes.length,'Quotations','')}
+    ${W('invoices','💳','#C97A2B',inv.length,'Invoices',unpaidList.length+' unpaid')}
+    ${W('customers','👤','#14B8A6',state.customers.length,'Customers','')}
+    ${W('expenses','💸','#F43F5E',fmt(expMonth),'Expenses','this month',1)}
+    ${W('damage','⚠️','#F59E0B',state.damages.length,'Damage reports','')}
+    ${W('reports','📊','#22C55E',fmt(paidMonth-expMonth),'Reports','net this month',1)}
+    ${W('settings','⚙️','#64748B','','Settings','Backup &amp; sync')}
   </div>
   <div class="card">
     <h3>Recent activity</h3>
