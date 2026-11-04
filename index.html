@@ -200,7 +200,7 @@ function defaultState(){
   };
 }
 /* ---------- shared database (Supabase) ---------- */
-const SB_URL='https://kzfkiyzwxohwdzxqfkjl.supabase.co', SB_KEY='sb_publishable_m8hr5FDr4y6grk5-oeMpbw_cIhKZXt0';
+const SB_URL='https://kzfkiyzwxohwdzxqfkjl.supabase.co', SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6ZmtpeXp3eG9od2R6eHFma2psIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3ODkxMjEsImV4cCI6MjEwOTM2NTEyMX0.X7Watwfgl2-5KHPhWl3V0iIQnk0wEQmWU8icbIgOpPA';
 const CACHE='kieltec_cloud_cache_v2', SESS='kieltec_cloud_session_v1', OLD=KEY;
 const KINDS=['customers','bookings','quotes','invoices','expenses','damages'];
 let sess=null; try{ sess=JSON.parse(localStorage.getItem(SESS)); }catch(e){}
