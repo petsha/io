@@ -223,7 +223,7 @@ function defaultState(){
 const SB_URL='https://kzfkiyzwxohwdzxqfkjl.supabase.co', SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6ZmtpeXp3eG9od2R6eHFma2psIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3ODkxMjEsImV4cCI6MjEwOTM2NTEyMX0.X7Watwfgl2-5KHPhWl3V0iIQnk0wEQmWU8icbIgOpPA';
 const CACHE='kieltec_cloud_cache_v2', SESS='kieltec_cloud_session_v1', OLD=KEY;
 const KINDS=['customers','bookings','quotes','invoices','expenses','damages'];
-let sess=null; try{ sess=JSON.parse(localStorage.getItem(SESS)); }catch(e){}
+let sess=null; try{ localStorage.removeItem(SESS); sess=JSON.parse(sessionStorage.getItem(SESS)); }catch(e){}
 let cache={}; try{ cache=JSON.parse(localStorage.getItem(CACHE))||{}; }catch(e){}
 let synced=cache.synced||{}, cursor=cache.cursor||'1970-01-01T00:00:00Z';
 let state={...defaultState(), ...(cache.state||{})};
@@ -248,10 +248,10 @@ async function api(path,opt={},retry=true){
   if(r.status===401 && retry && sess && await refreshSess()) return api(path,opt,false);
   return r;
 }
-function setSess(j){ sess={access_token:j.access_token,refresh_token:j.refresh_token}; localStorage.setItem(SESS,JSON.stringify(sess)); }
+function setSess(j){ sess={access_token:j.access_token,refresh_token:j.refresh_token}; try{ sessionStorage.setItem(SESS,JSON.stringify(sess)); sessionStorage.setItem('kieltec_last_active_v1',String(Date.now())); }catch(e){} }
 async function refreshSess(){
   let r; try{ r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:sess.refresh_token})}); }catch(e){ return false; }
-  if(!r.ok){ sess=null; localStorage.removeItem(SESS); showLogin('Please log in again.'); return false; }
+  if(!r.ok){ sess=null; try{ sessionStorage.removeItem(SESS); }catch(e){} showLogin('Please log in again.'); return false; }
   setSess(await r.json()); return true;
 }
 async function doLogin(email,pass){
@@ -356,6 +356,31 @@ async function startSync(){
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&sess){ push().then(pull); } });
   window.addEventListener('online',()=>{ push().then(pull); });
 }
+/* ---------- auto logout ---------- */
+const LAST='kieltec_last_active_v1', IDLEKEY='kieltec_idle_min';
+function idleMs(){ try{ const v=localStorage.getItem(IDLEKEY); const m=v===null?10:Number(v); return m>0?m*60000:0; }catch(e){ return 600000; } }
+let lastActive=Date.now(), idleWarned=false, hiddenAt=0;
+function touchActive(){ lastActive=Date.now(); idleWarned=false; try{ if(sess) sessionStorage.setItem(LAST,String(lastActive)); }catch(e){} }
+async function autoLogout(msg){
+  if(!sess) return;
+  try{ await push(); }catch(e){}
+  const pending=syncState!=='ok';                 // unsent changes stay on this phone until it can sync
+  sess=null; try{ sessionStorage.removeItem(SESS); sessionStorage.removeItem(LAST); }catch(e){}
+  if(!pending){ try{ localStorage.removeItem(CACHE); }catch(e){} state=defaultState(); synced={}; cursor='1970-01-01T00:00:00Z'; }
+  try{ document.getElementById('modalroot').innerHTML=''; }catch(e){}
+  render(); showLogin(msg||'You were logged out.');
+}
+['pointerdown','keydown','touchstart','scroll','input'].forEach(ev=>window.addEventListener(ev,touchActive,{passive:true,capture:true}));
+setInterval(()=>{
+  const ms=idleMs(); if(!sess||!ms) return;
+  const idle=Date.now()-lastActive;
+  if(idle>=ms) autoLogout('You were logged out after being inactive.');
+  else if(idle>=ms-60000 && !idleWarned){ idleWarned=true; toast('Logging out in 1 minute — tap the screen to stay logged in'); }
+},10000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){ hiddenAt=Date.now(); return; }
+  const ms=idleMs(); if(sess&&ms&&hiddenAt&&Date.now()-hiddenAt>=ms) autoLogout('You were logged out after being away.'); else touchActive();
+});
 async function mergeData(data){
   const add={}; let n=0;
   for(const k of KINDS){
@@ -1076,6 +1101,7 @@ function renderSettings(main){
   <div class="card">
     <h3>Shared database</h3>
     <div id="syncInfo" style="font-size:14px;margin-bottom:10px"></div>
+    <div style="font-size:14px;margin-bottom:10px">Log out automatically after being away or inactive for: <select id="idleSel" style="width:auto;margin-left:6px"><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="0">Never</option></select></div>
     <div class="toolbar">
       <button class="btn ghost" id="syncNow">Sync now</button>
       <button class="btn ghost" id="uploadOld">Upload this phone's old data</button>
@@ -1094,7 +1120,9 @@ function renderSettings(main){
   };
   setStatus(syncState);
   document.getElementById('syncNow').onclick=async()=>{ await push(); await pull(); render(); };
-  document.getElementById('logoutBtn').onclick=()=>{ if(!confirm('Log out on this phone?')) return; sess=null; localStorage.removeItem(SESS); showLogin(); };
+  document.getElementById('logoutBtn').onclick=()=>{ if(confirm('Log out on this phone?')) autoLogout('You were logged out.'); };
+  const idleSel=document.getElementById('idleSel'); idleSel.value=String(idleMs()/60000);
+  idleSel.onchange=()=>{ try{ localStorage.setItem(IDLEKEY,idleSel.value); }catch(e){} touchActive(); toast('Auto-logout updated'); };
   document.getElementById('uploadOld').onclick=async()=>{
     let raw=null; try{ raw=localStorage.getItem(OLD); }catch(e){}
     if(!raw){ toast('No old data found on this phone'); return; }
@@ -1119,6 +1147,8 @@ render();
 (async function boot(){
   if(!/^https?:/.test(SB_URL)||SB_KEY.startsWith('PASTE')){ showLogin('Not connected yet: the database address and key still need to be added to this file.'); return; }
   if(!sess){ showLogin(); return; }
+  { const last=Number(sessionStorage.getItem(LAST)||0), ms=idleMs(); if(ms&&last&&Date.now()-last>ms){ await autoLogout('You were logged out after being away.'); return; } }
+  touchActive();
   await startSync();
 })();
 </script>
