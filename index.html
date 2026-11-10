@@ -212,7 +212,7 @@ function defaultState(){
       name:'Kieltec', reg:'2016/388203/57',
       addr:['St Georges Street / St Georges Mall','Thibault Square Pavilion Shop 10','Cape Town City Centre 8001'],
       phone:'072 025 8865', website:'www.kieltec.co.za', email:'info@kieltec.co.za',
-      bankName:'FNB', accType:'Gold Business Account', accNo:'', branchCode:'250655',
+      bankName:'FNB', accType:'Gold Business Account', accNo:'63162619804', branchCode:'250655',
       consultFee:150, warrantyText:'Our warranty only covers the error / part replaced by Kieltec.'
     },
     customers:[], bookings:[], quotes:[], invoices:[], expenses:[], damages:[],
@@ -230,7 +230,7 @@ let state={...defaultState(), ...(cache.state||{})};
 let syncState='idle', lastSync=0;
 function persistCache(){ try{ localStorage.setItem(CACHE, JSON.stringify({state,synced,cursor})); }catch(e){} }
 function hsh(str){ let x=5381; for(let i=0;i<str.length;i++) x=((x<<5)+x+str.charCodeAt(i))|0; return str.length+':'+x; }
-function entries(){ const o=[{kind:'settings',id:'settings',data:state.settings}]; KINDS.forEach(k=>state[k].forEach(r=>o.push({kind:k,id:r.id,data:r}))); return o; }
+function entries(){ const o=[]; if(synced['settings|settings']!==undefined||JSON.stringify(state.settings)!==JSON.stringify(defaultState().settings)) o.push({kind:'settings',id:'settings',data:state.settings}); KINDS.forEach(k=>state[k].forEach(r=>o.push({kind:k,id:r.id,data:r}))); return o; }
 function save(){ persistCache(); push(); return true; }
 function setStatus(st){
   syncState=st; if(st==='ok') lastSync=Date.now();
@@ -331,11 +331,12 @@ async function pull(){
         const arr=isSet?null:state[row.kind]; if(!isSet&&!arr) continue;
         const idx=isSet?-1:arr.findIndex(x=>x.id===row.id);
         const local=isSet?state.settings:(idx>=0?arr[idx]:null);
-        if(local && hsh(JSON.stringify(local))!==synced[key]) continue;
+        const pristine=isSet&&synced[key]===undefined&&JSON.stringify(local)===JSON.stringify(defaultState().settings);
+        if(local && !pristine && hsh(JSON.stringify(local))!==synced[key]) continue;
         if(row.deleted){ if(idx>=0){ arr.splice(idx,1); changed=true; } delete synced[key]; continue; }
         const nj=JSON.stringify(row.data);
         if(!local||JSON.stringify(local)!==nj) changed=true;
-        if(isSet) state.settings={...defaultState().settings,...row.data}; else if(idx>=0) arr[idx]=row.data; else arr.push(row.data);
+        if(isSet){ state.settings={...defaultState().settings,...row.data}; if(!state.settings.accNo) state.settings.accNo=defaultState().settings.accNo; } else if(idx>=0) arr[idx]=row.data; else arr.push(row.data);
         synced[key]=hsh(nj);
       }
       const last=rows.length?rows[rows.length-1].updated_at:null;
