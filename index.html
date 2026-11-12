@@ -587,7 +587,7 @@ function openJobForm(kind, id){
   document.getElementById('camInput').onchange=async (e)=>{
     const files=[...e.target.files];
     for(const f of files){
-      const data=await readImage(f);
+      const data=await readImageOriginal(f);
       if(!data) continue;
       const it=rec.items[pendingCamIdx]; if(!it) continue;
       (it.photos=it.photos||[]).push(data);
@@ -649,11 +649,13 @@ function upsertCustomerFromJob(rec){
 }
 function closeModal(){ document.getElementById('modalroot').innerHTML=''; }
 
-function readImage(file){
-  // Keeps the photo exactly as taken: no resizing and no re-encoding.
+// Read and store the selected photo exactly as supplied: no resizing,
+// canvas conversion, JPEG recompression, or quality reduction.
+function readImageOriginal(file){
   return new Promise(res=>{
+    if(!file || !file.type || !file.type.startsWith('image/')) return res(null);
     const fr=new FileReader();
-    fr.onload=()=>res(fr.result);
+    fr.onload=()=>res(typeof fr.result==='string' ? fr.result : null);
     fr.onerror=()=>res(null);
     fr.readAsDataURL(file);
   });
