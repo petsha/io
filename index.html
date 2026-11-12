@@ -130,6 +130,20 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
   .pr-photos img{width:150px;height:150px;object-fit:cover;border:1px solid #999;}
   .pr-photos figcaption{font-size:11px;color:#333;margin-top:2px;}
 }
+
+/* ---------- widget-style home ---------- */
+.wgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:12px 0}
+@media (min-width:900px){.wgrid{grid-template-columns:repeat(4,1fr)}}
+.wgt{--c:var(--accent);position:relative;overflow:hidden;text-align:left;display:flex;flex-direction:column;gap:2px;min-height:118px;padding:14px;border-radius:22px;
+  border:1px solid color-mix(in srgb,var(--c) 40%,var(--line));background:linear-gradient(150deg,color-mix(in srgb,var(--c) 30%,var(--panel)),var(--panel) 78%);
+  color:var(--ink);box-shadow:0 6px 18px rgba(0,0,0,.12);transition:transform .12s,box-shadow .12s;cursor:pointer;font:inherit;width:100%}
+.wgt:active{transform:scale(.96);box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.wgt .wi{font-size:24px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:14px;background:color-mix(in srgb,var(--c) 28%,transparent);margin-bottom:8px}
+.wgt .wn{font-family:var(--mono);font-size:22px;font-weight:700;line-height:1.1}
+.wgt .wn.sm{font-size:16px}
+.wgt .wl{font-size:13px;font-weight:600;margin-top:2px}
+.wgt .ws{font-size:11px;color:var(--ink-dim)}
+.wgreet{margin:4px 0 0}
 </style>
 </head>
 <body>
@@ -200,7 +214,7 @@ function defaultState(){
   };
 }
 /* ---------- shared database (Supabase) ---------- */
-const SB_URL='https://kzfkiyzwxohwdzxqfkjl.supabase.co', SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6ZmtpeXp3eG9od2R6eHFma2psIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3ODkxMjEsImV4cCI6MjEwOTM2NTEyMX0.X7Watwfgl2-5KHPhWl3V0iIQnk0wEQmWU8icbIgOpPA';
+let dbh=null, assetsH=null; const HOLDER=Math.random().toString(36).slice(2);
 const CACHE='kieltec_cloud_cache_v2', SESS='kieltec_cloud_session_v1', OLD=KEY;
 const KINDS=['customers','bookings','quotes','invoices','expenses','damages'];
 let sess=null; try{ sess=JSON.parse(localStorage.getItem(SESS)); }catch(e){}
@@ -221,120 +235,75 @@ function setStatus(st){
   const si=document.getElementById('syncInfo'); if(si) si.textContent=p.textContent+(lastSync?' (last: '+new Date(lastSync).toLocaleTimeString()+')':'');
 }
 (function(){ const st=document.createElement('style'); st.textContent='@media print{#syncpill,#loginov{display:none!important}}'; document.head.appendChild(st); })();
-async function api(path,opt={},retry=true){
-  const hd={apikey:SB_KEY,'Content-Type':'application/json',...(opt.headers||{})};
-  if(sess) hd.Authorization='Bearer '+sess.access_token;
-  const r=await fetch(SB_URL+path,{...opt,headers:hd});
-  if(r.status===401 && retry && sess && await refreshSess()) return api(path,opt,false);
-  return r;
-}
-function setSess(j){ sess={access_token:j.access_token,refresh_token:j.refresh_token}; localStorage.setItem(SESS,JSON.stringify(sess)); }
-async function refreshSess(){
-  let r; try{ r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:sess.refresh_token})}); }catch(e){ return false; }
-  if(!r.ok){ sess=null; localStorage.removeItem(SESS); showLogin('Please log in again.'); return false; }
-  setSess(await r.json()); return true;
-}
-async function doLogin(email,pass){
-  const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(j.error_description||j.msg||'Login failed');
-  setSess(j);
-}
 function showLogin(msg){
   let o=document.getElementById('loginov');
-  if(!o){ o=document.createElement('div'); o.id='loginov'; o.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg,#fff);color:var(--ink,#111);display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(o); }
-  o.innerHTML='<form id="lgf" style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px"><h2 style="margin:0">Kieltec Workshop Manager</h2><input id="lg_e" type="email" placeholder="Email" autocomplete="username" required style="padding:12px;font-size:16px"><input id="lg_p" type="password" placeholder="Password" autocomplete="current-password" required style="padding:12px;font-size:16px"><button class="btn" type="submit" style="padding:12px;font-size:16px">Log in</button><div id="lg_m" style="color:#b00020;min-height:20px">'+(msg||'')+'</div></form>';
-  document.getElementById('lgf').onsubmit=async(ev)=>{
-    ev.preventDefault(); const m=document.getElementById('lg_m'); m.textContent='Logging in…';
-    try{ await doLogin(document.getElementById('lg_e').value.trim(),document.getElementById('lg_p').value); o.remove(); await startSync(); }
-    catch(err){ m.textContent=err.message||'Login failed'; }
-  };
-}
-async function uploadPhoto(d){
-  const blob=await (await fetch(d)).blob();
-  const path=(crypto.randomUUID?crypto.randomUUID():uid()+Math.random().toString(36).slice(2))+'.jpg';
-  const r=await api('/storage/v1/object/photos/'+path,{method:'POST',headers:{'Content-Type':'image/jpeg'},body:blob});
-  if(!r.ok) throw new Error('photo upload failed');
-  return SB_URL+'/storage/v1/object/public/photos/'+path;
+  if(!o){ o=document.createElement('div'); o.id='loginov'; o.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg,#fff);color:var(--ink,#111);display:flex;align-items:center;justify-content:center;padding:24px;text-align:center'; document.body.appendChild(o); }
+  o.textContent=msg;
 }
 async function claimNo(kind){
-  const r=await api('/rest/v1/rpc/next_number',{method:'POST',body:JSON.stringify({k:kind})});
-  if(!r.ok) throw new Error('no connection');
-  return await r.json();
+  const lock=dbh.doc('locks/'+kind);
+  for(let t=0;t<10;t++){
+    const a=await lock.acquire({holder:HOLDER,ttlMs:4000});
+    if(a.acquired){ const c=dbh.doc('counters/'+kind); const sn=await c.get(); const n=((sn.exists&&sn.data().last)||0)+1; await c.set({last:n}); return n; }
+    await new Promise(r=>setTimeout(r,400));
+  }
+  throw new Error('busy');
 }
+async function bumpCounter(kind,n){ const c=dbh.doc('counters/'+kind); const sn=await c.get(); await c.set({last:Math.max(n,(sn.exists&&sn.data().last)||0)}); }
 let pushing=false, again=false;
 async function push(){
-  if(!sess) return;
+  if(!dbh) return;
   if(pushing){ again=true; return; }
   pushing=true;
   try{
     do{
       again=false;
-      const pend=entries().some(e=>synced[e.kind+'|'+e.id]!==hsh(JSON.stringify(e.data)))||Object.keys(synced).some(k=>!entries().some(e=>e.kind+'|'+e.id===k));
-      if(!pend) break;
-      setStatus('busy');
-      for(const k of ['bookings','quotes','invoices']) for(const r of state[k]) for(const it of (r.items||[])) for(let i=0;i<(it.photos||[]).length;i++){
-        if(String(it.photos[i]).startsWith('data:')) it.photos[i]=await uploadPhoto(it.photos[i]);
+      if(assetsH) for(const k of ['bookings','quotes','invoices']) for(const r of state[k]) for(const it of (r.items||[])) for(let i=0;i<(it.photos||[]).length;i++){
+        if(String(it.photos[i]).startsWith('data:')){ setStatus('busy'); const bl=await (await fetch(it.photos[i])).blob(); it.photos[i]=(await assetsH.upload(bl)).url; }
       }
-      const cur=entries(), keys=new Set(), up=[];
-      for(const e of cur){ const key=e.kind+'|'+e.id; keys.add(key); const hh=hsh(JSON.stringify(e.data)); if(synced[key]!==hh) up.push({e,key,hh}); }
+      const keys=new Set(), up=[];
+      for(const e of entries()){ const key=e.kind+'|'+e.id; keys.add(key); const hh=hsh(JSON.stringify(e.data)); if(synced[key]!==hh) up.push({e,key,hh}); }
       const del=Object.keys(synced).filter(k=>!keys.has(k));
-      for(let i=0;i<up.length;i+=100){
-        const part=up.slice(i,i+100);
-        const r=await api('/rest/v1/records?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(part.map(u=>({id:u.e.id,kind:u.e.kind,data:u.e.data,deleted:false})))});
-        if(!r.ok) throw new Error(await r.text());
-        part.forEach(u=>synced[u.key]=u.hh);
-      }
-      if(del.length){
-        const r=await api('/rest/v1/records?id=in.('+del.map(k=>encodeURIComponent(k.split('|')[1])).join(',')+')',{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({deleted:true})});
-        if(!r.ok) throw new Error(await r.text());
-        del.forEach(k=>delete synced[k]);
-      }
+      if(up.length||del.length) setStatus('busy');
+      for(const u of up){ await dbh.doc('records/'+u.e.id).set({kind:u.e.kind,data:u.e.data}); synced[u.key]=u.hh; }
+      for(const k of del){ await dbh.doc('records/'+k.split('|')[1]).delete(); delete synced[k]; }
       persistCache();
     }while(again);
     setStatus('ok');
   }catch(e){ setStatus('err'); }
   finally{ pushing=false; }
 }
-let pulling=false;
-async function pull(){
-  if(!sess||pulling) return; pulling=true;
-  try{
-    let changed=false;
-    for(let loop=0;loop<20;loop++){
-      const r=await api('/rest/v1/records?select=id,kind,data,deleted,updated_at&order=updated_at.asc&limit=1000&updated_at=gte.'+encodeURIComponent(cursor));
-      if(!r.ok) throw new Error('pull failed');
-      const rows=await r.json();
-      for(const row of rows){
-        const key=row.kind+'|'+row.id;
-        const isSet=row.kind==='settings';
-        const arr=isSet?null:state[row.kind]; if(!isSet&&!arr) continue;
-        const idx=isSet?-1:arr.findIndex(x=>x.id===row.id);
-        const local=isSet?state.settings:(idx>=0?arr[idx]:null);
-        if(local && hsh(JSON.stringify(local))!==synced[key]) continue;
-        if(row.deleted){ if(idx>=0){ arr.splice(idx,1); changed=true; } delete synced[key]; continue; }
-        const nj=JSON.stringify(row.data);
-        if(!local||JSON.stringify(local)!==nj) changed=true;
-        if(isSet) state.settings={...defaultState().settings,...row.data}; else if(idx>=0) arr[idx]=row.data; else arr.push(row.data);
-        synced[key]=hsh(nj);
-      }
-      const last=rows.length?rows[rows.length-1].updated_at:null;
-      const moved=last&&last!==cursor; if(last) cursor=last;
-      if(rows.length<1000||!moved) break;
-    }
-    persistCache(); setStatus('ok');
-    const busy=document.getElementById('modalroot').innerHTML!==''||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||'');
-    if(changed&&!busy) render();
-  }catch(e){ setStatus('err'); }
-  finally{ pulling=false; }
+async function pull(){}
+let snapFirst=true;
+function applySnap(snap){
+  let changed=false;
+  const place=(kind,id)=>{ const isSet=kind==='settings', arr=isSet?null:state[kind]; if(!isSet&&!arr) return null; const idx=isSet?-1:arr.findIndex(x=>x.id===id); return {isSet,arr,idx,local:isSet?state.settings:(idx>=0?arr[idx]:null),key:kind+'|'+id}; };
+  snap.docChanges().forEach(ch=>{
+    const id=ch.doc.id, d=ch.doc.data()||{};
+    const kind=ch.type==='removed'?(Object.keys(synced).find(k=>k.endsWith('|'+id))||'').split('|')[0]:d.kind;
+    const p=kind&&place(kind,id); if(!p) return;
+    if(p.local && hsh(JSON.stringify(p.local))!==synced[p.key]) return;
+    if(!p.local && synced[p.key]!==undefined && ch.type!=='removed') return;
+    if(ch.type==='removed'){ if(p.idx>=0){ p.arr.splice(p.idx,1); changed=true; } delete synced[p.key]; return; }
+    const nj=JSON.stringify(d.data);
+    if(!p.local||JSON.stringify(p.local)!==nj) changed=true;
+    if(p.isSet) state.settings={...defaultState().settings,...d.data}; else if(p.idx>=0) p.arr[p.idx]=d.data; else p.arr.push(d.data);
+    synced[p.key]=hsh(nj);
+  });
+  if(snapFirst){
+    snapFirst=false; const ids=new Set(snap.docs.map(x=>x.id));
+    Object.keys(synced).forEach(key=>{ const [kind,id]=key.split('|'); if(ids.has(id)) return; const p=place(kind,id); if(p&&p.idx>=0&&hsh(JSON.stringify(p.local))===synced[key]){ p.arr.splice(p.idx,1); delete synced[key]; changed=true; } });
+  }
+  persistCache(); setStatus('ok');
+  const busy=document.getElementById('modalroot').innerHTML!==''||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||'');
+  if(changed&&!busy) render();
 }
 let timersOn=false;
 async function startSync(){
-  await pull(); await push();
   if(timersOn) return; timersOn=true;
-  setInterval(()=>{ if(sess&&!document.hidden){ push().then(pull); } },20000);
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&sess){ push().then(pull); } });
-  window.addEventListener('online',()=>{ push().then(pull); });
+  dbh.collection('records').onSnapshot(applySnap,()=>setStatus('err'));
+  window.addEventListener('online',()=>push());
+  setInterval(()=>push(),20000);
 }
 async function mergeData(data){
   const add={}; let n=0;
@@ -350,7 +319,7 @@ async function mergeData(data){
     for(const k of ['bookings','quotes','invoices']){
       add[k].sort((a,b)=>(a.no||0)-(b.no||0));
       if(renum){ for(const r of add[k]) r.no=await claimNo(k); }
-      else{ const mx=add[k].reduce((m,r)=>Math.max(m,r.no||0),0); if(mx){ const r=await api('/rest/v1/rpc/bump_counter',{method:'POST',body:JSON.stringify({k,n:mx})}); if(!r.ok) throw new Error('x'); } }
+      else{ const mx=add[k].reduce((m,r)=>Math.max(m,r.no||0),0); if(mx){ await bumpCounter(k,mx); } }
     }
   }catch(e){ toast('No connection — nothing was uploaded'); return; }
   KINDS.forEach(k=>state[k].push(...add[k]));
@@ -448,19 +417,28 @@ function render(){
 
 /* ---------- dashboard ---------- */
 function renderDashboard(main){
-  const mk=monthKey(today());
-  const incomeThisMonth = state.invoices.filter(i=>monthKey(i.date)===mk).reduce((s,i)=>s+itemsTotal(i.items),0);
-  const outstanding = state.invoices.filter(i=>!i.paid).reduce((s,i)=>s+itemsTotal(i.items),0);
-  const expensesThisMonth = state.expenses.filter(e=>monthKey(e.date)===mk).reduce((s,e)=>s+Number(e.amount||0),0);
-  const openBookings = state.bookings.filter(b=>!b.paid).length;
-
+  const mk=monthKey(today()), tot=i=>itemsTotal(i.items), inv=state.invoices;
+  const invoicedMonth=inv.filter(i=>monthKey(i.date)===mk).reduce((s,i)=>s+tot(i),0);
+  const paidMonth=inv.filter(i=>monthKey(i.date)===mk&&i.paid).reduce((s,i)=>s+tot(i),0);
+  const unpaidList=inv.filter(i=>!i.paid), outstanding=unpaidList.reduce((s,i)=>s+tot(i),0);
+  const expMonth=state.expenses.filter(e=>monthKey(e.date)===mk).reduce((s,e)=>s+Number(e.amount||0),0);
+  const openBookings=state.bookings.filter(b=>!b.paid).length;
+  const hr=new Date().getHours(), greet=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
+  const dateTxt=new Date().toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long'});
+  const W=(route,icon,color,num,label,sub,sm)=>`<button class="wgt" style="--c:${color}" onclick="location.hash='#${route}'"><span class="wi">${icon}</span>${num!==''?`<span class="wn${sm?' sm':''}">${num}</span>`:''}<span class="wl">${label}</span>${sub?`<span class="ws">${sub}</span>`:''}</button>`;
   main.innerHTML = `
-  <header class="top"><div><h1>Dashboard</h1><div style="color:var(--ink-dim);font-size:13px">Overview of the workshop, updated live from your records.</div></div></header>
-  <div class="grid stat-grid">
-    <div class="stat"><div class="num">${fmt(incomeThisMonth)}</div><div class="lbl">Invoiced this month</div></div>
-    <div class="stat"><div class="num">${fmt(outstanding)}</div><div class="lbl">Outstanding (unpaid invoices)</div></div>
-    <div class="stat"><div class="num">${fmt(expensesThisMonth)}</div><div class="lbl">Expenses this month</div></div>
-    <div class="stat"><div class="num">${openBookings}</div><div class="lbl">Open bookings (unpaid)</div></div>
+  <header class="top"><div><h1 class="wgreet">${greet}</h1><div style="color:var(--ink-dim);font-size:13px">${dateTxt}</div></div></header>
+  <div class="wgrid">
+    ${W('reports','📈','#22C55E',fmt(invoicedMonth),'Invoiced this month',fmt(paidMonth)+' paid',1)}
+    ${W('invoices','⏳','#EF4444',fmt(outstanding),'Outstanding',unpaidList.length+' unpaid invoice'+(unpaidList.length===1?'':'s'),1)}
+    ${W('bookings','🧾','#3B82F6',openBookings,'Bookings','open · '+state.bookings.length+' total')}
+    ${W('quotes','📋','#8B5CF6',state.quotes.length,'Quotations','')}
+    ${W('invoices','💳','#C97A2B',inv.length,'Invoices',unpaidList.length+' unpaid')}
+    ${W('customers','👤','#14B8A6',state.customers.length,'Customers','')}
+    ${W('expenses','💸','#F43F5E',fmt(expMonth),'Expenses','this month',1)}
+    ${W('damage','⚠️','#F59E0B',state.damages.length,'Damage reports','')}
+    ${W('reports','📊','#22C55E',fmt(paidMonth-expMonth),'Reports','net this month',1)}
+    ${W('settings','⚙️','#64748B','','Settings','Backup &amp; sync')}
   </div>
   <div class="card">
     <h3>Recent activity</h3>
@@ -609,7 +587,7 @@ function openJobForm(kind, id){
   document.getElementById('camInput').onchange=async (e)=>{
     const files=[...e.target.files];
     for(const f of files){
-      const data=await compressImage(f);
+      const data=await readImage(f);
       if(!data) continue;
       const it=rec.items[pendingCamIdx]; if(!it) continue;
       (it.photos=it.photos||[]).push(data);
@@ -671,21 +649,11 @@ function upsertCustomerFromJob(rec){
 }
 function closeModal(){ document.getElementById('modalroot').innerHTML=''; }
 
-function compressImage(file, maxDim=800, quality=0.55){
+function readImage(file){
+  // Keeps the photo exactly as taken: no resizing and no re-encoding.
   return new Promise(res=>{
     const fr=new FileReader();
-    fr.onload=()=>{
-      const img=new Image();
-      img.onload=()=>{
-        const scale=Math.min(1, maxDim/Math.max(img.width,img.height));
-        const w=Math.max(1,Math.round(img.width*scale)), h=Math.max(1,Math.round(img.height*scale));
-        const c=document.createElement('canvas'); c.width=w; c.height=h;
-        c.getContext('2d').drawImage(img,0,0,w,h);
-        res(c.toDataURL('image/jpeg',quality));
-      };
-      img.onerror=()=>res(null);
-      img.src=fr.result;
-    };
+    fr.onload=()=>res(fr.result);
     fr.onerror=()=>res(null);
     fr.readAsDataURL(file);
   });
@@ -714,7 +682,7 @@ function printJob(kind,id){
     <table class="pr-table"><thead><tr><th>Model</th><th>Serial no.</th><th>Issue / error</th><th>Price</th><th>Qty</th><th>Total</th></tr></thead>
     <tbody>${(rec.items||[]).map(i=>`<tr><td>${escapeHtml(i.model)}</td><td>${escapeHtml(i.serial)}</td><td>${escapeHtml(i.error)}</td><td>${fmt(i.price)}</td><td>${i.qty}</td><td>${fmt((i.price||0)*(i.qty||1))}</td></tr>`).join('')}</tbody></table>
     ${(rec.items||[]).some(i=>(i.photos||[]).length)?`<h3>Device photos</h3><div class="pr-photos">${(rec.items||[]).flatMap((i,idx)=>(i.photos||[]).map(p=>`<figure><img src="${p}"><figcaption>${escapeHtml(i.model||('Device '+(idx+1)))}</figcaption></figure>`)).join('')}</div>`:''}
-    <div class="pr-total">Total: ${fmt(itemsTotal(rec.items))} — ${rec.paid?'PAID':'UNPAID'}</div>
+    <div class="pr-total">Total: ${fmt(itemsTotal(rec.items))}${rec.paid?' — PAID':''}</div>
     ${rec.notes?`<div style="margin-top:8px"><b>Notes:</b> ${escapeHtml(rec.notes)}</div>`:''}
     <div class="pr-terms">
       <b>Banking details:</b> ${escapeHtml(s.bankName)} · ${escapeHtml(s.accType)} · Acc ${escapeHtml(s.accNo)} · Branch ${escapeHtml(s.branchCode)}<br><br>
@@ -736,7 +704,7 @@ function printWithFilename(fname){
 }
 function jobSummary(rec, heading){
   const devices=(rec.items||[]).map(i=>[i.model,i.serial].filter(Boolean).join(' ')).filter(Boolean).join('; ');
-  return state.settings.name+' '+heading+' #'+rec.no+' | '+rec.customerName+(devices?' | '+devices:'')+' | Total '+fmt(itemsTotal(rec.items))+' | '+(rec.paid?'PAID':'UNPAID');
+  return state.settings.name+' '+heading+' #'+rec.no+' | '+rec.customerName+(devices?' | '+devices:'')+' | Total '+fmt(itemsTotal(rec.items))+(rec.paid?' | PAID':'');
 }
 function shareJob(kind,id){
   const rec=state[kind].find(x=>x.id===id); if(!rec) return;
@@ -976,25 +944,31 @@ function printDmg(id){
 }
 
 /* ---------- reports ---------- */
+function monthName(mk){ const [y,m]=mk.split('-').map(Number); return new Date(y,m-1,1).toLocaleString('en-ZA',{month:'long',year:'numeric'}); }
 function renderReports(main){
   const weeks={};
   state.invoices.forEach(i=>{ const wk=weekLabel(i.date); if(!wk) return; weeks[wk]=weeks[wk]||{income:0,count:0}; weeks[wk].income+=itemsTotal(i.items); weeks[wk].count++; });
-  const months={};
-  state.invoices.forEach(i=>{ const mk=monthKey(i.date); if(!mk) return; months[mk]=months[mk]||0; months[mk]+=itemsTotal(i.items); });
-  state.expenses.forEach(e=>{ const mk=monthKey(e.date); if(!mk) return; months[mk+'_exp']=(months[mk+'_exp']||0)+Number(e.amount||0); });
-
-  const monthKeys=[...new Set(state.invoices.map(i=>monthKey(i.date)).concat(state.expenses.map(e=>monthKey(e.date))))].filter(Boolean).sort();
-
+  const M={}, ok=mk=>/^\d{4}-\d{2}$/.test(mk), get=mk=>M[mk]=M[mk]||{n:0,inv:0,paid:0,exp:0,cats:{}};
+  state.invoices.forEach(i=>{ const mk=monthKey(i.date); if(!ok(mk)) return; const t=itemsTotal(i.items), m=get(mk); m.n++; m.inv+=t; if(i.paid) m.paid+=t; });
+  state.expenses.forEach(e=>{ const mk=monthKey(e.date); if(!ok(mk)) return; const a=Number(e.amount||0), m=get(mk), c=e.category||'Other'; m.exp+=a; m.cats[c]=(m.cats[c]||0)+a; });
+  const keys=Object.keys(M).sort().reverse(), years=[...new Set(keys.map(k=>k.slice(0,4)))];
+  const row=(l,v,st)=>`<tr><td>${l}</td><td class="mono" style="text-align:right;${st||''}">${v}</td></tr>`;
+  const col=n=>`color:${n>=0?'var(--good)':'var(--bad)'};font-weight:600`;
+  const block=(m)=>row('Invoices',m.n)+row('Invoiced',fmt(m.inv))+row('Paid (received)',fmt(m.paid))+row('Unpaid (still owed)',fmt(m.inv-m.paid))+row('Expenses',fmt(m.exp))+row('Net (paid − expenses)',fmt(m.paid-m.exp),col(m.paid-m.exp));
+  const body=years.map(y=>{
+    const ks=keys.filter(k=>k.startsWith(y));
+    const T=ks.reduce((a,k)=>({n:a.n+M[k].n,inv:a.inv+M[k].inv,paid:a.paid+M[k].paid,exp:a.exp+M[k].exp}),{n:0,inv:0,paid:0,exp:0});
+    return `<div class="card"><h3>${y} — full year summary</h3><div class="tablewrap"><table><tbody>${block(T)}</tbody></table></div></div>`+
+      ks.map(k=>{ const m=M[k], cats=Object.entries(m.cats).sort((a,b)=>b[1]-a[1]);
+        return `<div class="card"><h3>${monthName(k)}</h3><div class="tablewrap"><table><tbody>${block(m)}</tbody></table></div>`+
+          (cats.length?`<div style="margin-top:10px;font-size:13px;color:var(--ink-dim)"><b>Expenses by category</b></div><div class="tablewrap"><table><tbody>${cats.map(([c,a])=>row(escapeHtml(c),fmt(a))).join('')}</tbody></table></div>`:'')+`</div>`; }).join('');
+  }).join('');
   main.innerHTML=`
-  <header class="top"><div><h1>Reports</h1><div style="color:var(--ink-dim);font-size:13px">Auto-calculated from your bookings, invoices and expenses.</div></div></header>
-  <div class="card"><h3>Monthly income vs. expenses</h3><div class="tablewrap">
-  ${monthKeys.length?`<table><thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th></tr></thead><tbody>
-  ${monthKeys.map(mk=>{ const inc=months[mk]||0; const exp=months[mk+'_exp']||0; return `<tr><td>${mk}</td><td class="mono">${fmt(inc)}</td><td class="mono">${fmt(exp)}</td><td class="mono" style="color:${inc-exp>=0?'var(--good)':'var(--bad)'}">${fmt(inc-exp)}</td></tr>`; }).join('')}
-  </tbody></table>`:'<div class="empty">Add invoices and expenses to see monthly reports.</div>'}
-  </div></div>
+  <header class="top"><div><h1>Reports</h1><div style="color:var(--ink-dim);font-size:13px">Month-by-month summary, newest first. Calculated from your invoices and expenses.</div></div></header>
+  ${body||'<div class="card"><div class="empty">Add invoices and expenses to see monthly reports.</div></div>'}
   <div class="card"><h3>Weekly sales (from invoices)</h3><div class="tablewrap">
   ${Object.keys(weeks).length? `<table><thead><tr><th>Week starting</th><th>Invoices</th><th>Total</th></tr></thead><tbody>
-  ${Object.entries(weeks).sort((a,b)=>a[0].localeCompare(b[0])).map(([wk,v])=>`<tr><td>${wk}</td><td>${v.count}</td><td class="mono">${fmt(v.income)}</td></tr>`).join('')}
+  ${Object.entries(weeks).sort((a,b)=>b[0].localeCompare(a[0])).map(([wk,v])=>`<tr><td>${wk}</td><td>${v.count}</td><td class="mono">${fmt(v.income)}</td></tr>`).join('')}
   </tbody></table>` : '<div class="empty">No invoices yet.</div>'}
   </div></div>`;
 }
@@ -1044,7 +1018,6 @@ function renderSettings(main){
     <div class="toolbar">
       <button class="btn ghost" id="syncNow">Sync now</button>
       <button class="btn ghost" id="uploadOld">Upload this phone's old data</button>
-      <button class="btn ghost" id="logoutBtn">Log out</button>
     </div>
   </div>`;
   document.getElementById('saveSettings').onclick=()=>{
@@ -1059,7 +1032,6 @@ function renderSettings(main){
   };
   setStatus(syncState);
   document.getElementById('syncNow').onclick=async()=>{ await push(); await pull(); render(); };
-  document.getElementById('logoutBtn').onclick=()=>{ if(!confirm('Log out on this phone?')) return; sess=null; localStorage.removeItem(SESS); showLogin(); };
   document.getElementById('uploadOld').onclick=async()=>{
     let raw=null; try{ raw=localStorage.getItem(OLD); }catch(e){}
     if(!raw){ toast('No old data found on this phone'); return; }
@@ -1081,9 +1053,10 @@ function renderSettings(main){
 
 render();
 (async function boot(){
-  if(!/^https?:/.test(SB_URL)||SB_KEY.startsWith('PASTE')){ showLogin('Not connected yet: the database address and key still need to be added to this file.'); return; }
-  if(!sess){ showLogin(); return; }
-  await startSync();
+  try{ dbh=await claude.use('db'); }catch(e){}
+  try{ assetsH=await claude.use('assets'); }catch(e){}
+  if(!dbh){ showLogin('The shared database is not available. Open this page while signed in to claude.ai.'); return; }
+  await startSync(); await push();
 })();
 </script>
 
