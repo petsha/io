@@ -714,7 +714,7 @@ function printJob(kind,id){
     <table class="pr-table"><thead><tr><th>Model</th><th>Serial no.</th><th>Issue / error</th><th>Price</th><th>Qty</th><th>Total</th></tr></thead>
     <tbody>${(rec.items||[]).map(i=>`<tr><td>${escapeHtml(i.model)}</td><td>${escapeHtml(i.serial)}</td><td>${escapeHtml(i.error)}</td><td>${fmt(i.price)}</td><td>${i.qty}</td><td>${fmt((i.price||0)*(i.qty||1))}</td></tr>`).join('')}</tbody></table>
     ${(rec.items||[]).some(i=>(i.photos||[]).length)?`<h3>Device photos</h3><div class="pr-photos">${(rec.items||[]).flatMap((i,idx)=>(i.photos||[]).map(p=>`<figure><img src="${p}"><figcaption>${escapeHtml(i.model||('Device '+(idx+1)))}</figcaption></figure>`)).join('')}</div>`:''}
-    <div class="pr-total">Total: ${fmt(itemsTotal(rec.items))} — ${rec.paid?'PAID':'UNPAID'}</div>
+    <div class="pr-total">Total: ${fmt(itemsTotal(rec.items))}${rec.paid?' — PAID':''}</div>
     ${rec.notes?`<div style="margin-top:8px"><b>Notes:</b> ${escapeHtml(rec.notes)}</div>`:''}
     <div class="pr-terms">
       <b>Banking details:</b> ${escapeHtml(s.bankName)} · ${escapeHtml(s.accType)} · Acc ${escapeHtml(s.accNo)} · Branch ${escapeHtml(s.branchCode)}<br><br>
@@ -736,7 +736,7 @@ function printWithFilename(fname){
 }
 function jobSummary(rec, heading){
   const devices=(rec.items||[]).map(i=>[i.model,i.serial].filter(Boolean).join(' ')).filter(Boolean).join('; ');
-  return state.settings.name+' '+heading+' #'+rec.no+' | '+rec.customerName+(devices?' | '+devices:'')+' | Total '+fmt(itemsTotal(rec.items))+' | '+(rec.paid?'PAID':'UNPAID');
+  return state.settings.name+' '+heading+' #'+rec.no+' | '+rec.customerName+(devices?' | '+devices:'')+' | Total '+fmt(itemsTotal(rec.items))+(rec.paid?' | PAID':'');
 }
 function shareJob(kind,id){
   const rec=state[kind].find(x=>x.id===id); if(!rec) return;
@@ -976,25 +976,31 @@ function printDmg(id){
 }
 
 /* ---------- reports ---------- */
+function monthName(mk){ const [y,m]=mk.split('-').map(Number); return new Date(y,m-1,1).toLocaleString('en-ZA',{month:'long',year:'numeric'}); }
 function renderReports(main){
   const weeks={};
   state.invoices.forEach(i=>{ const wk=weekLabel(i.date); if(!wk) return; weeks[wk]=weeks[wk]||{income:0,count:0}; weeks[wk].income+=itemsTotal(i.items); weeks[wk].count++; });
-  const months={};
-  state.invoices.forEach(i=>{ const mk=monthKey(i.date); if(!mk) return; months[mk]=months[mk]||0; months[mk]+=itemsTotal(i.items); });
-  state.expenses.forEach(e=>{ const mk=monthKey(e.date); if(!mk) return; months[mk+'_exp']=(months[mk+'_exp']||0)+Number(e.amount||0); });
-
-  const monthKeys=[...new Set(state.invoices.map(i=>monthKey(i.date)).concat(state.expenses.map(e=>monthKey(e.date))))].filter(Boolean).sort();
-
+  const M={}, ok=mk=>/^\d{4}-\d{2}$/.test(mk), get=mk=>M[mk]=M[mk]||{n:0,inv:0,paid:0,exp:0,cats:{}};
+  state.invoices.forEach(i=>{ const mk=monthKey(i.date); if(!ok(mk)) return; const t=itemsTotal(i.items), m=get(mk); m.n++; m.inv+=t; if(i.paid) m.paid+=t; });
+  state.expenses.forEach(e=>{ const mk=monthKey(e.date); if(!ok(mk)) return; const a=Number(e.amount||0), m=get(mk), c=e.category||'Other'; m.exp+=a; m.cats[c]=(m.cats[c]||0)+a; });
+  const keys=Object.keys(M).sort().reverse(), years=[...new Set(keys.map(k=>k.slice(0,4)))];
+  const row=(l,v,st)=>`<tr><td>${l}</td><td class="mono" style="text-align:right;${st||''}">${v}</td></tr>`;
+  const col=n=>`color:${n>=0?'var(--good)':'var(--bad)'};font-weight:600`;
+  const block=(m)=>row('Invoices',m.n)+row('Invoiced',fmt(m.inv))+row('Paid (received)',fmt(m.paid))+row('Unpaid (still owed)',fmt(m.inv-m.paid))+row('Expenses',fmt(m.exp))+row('Net (paid − expenses)',fmt(m.paid-m.exp),col(m.paid-m.exp));
+  const body=years.map(y=>{
+    const ks=keys.filter(k=>k.startsWith(y));
+    const T=ks.reduce((a,k)=>({n:a.n+M[k].n,inv:a.inv+M[k].inv,paid:a.paid+M[k].paid,exp:a.exp+M[k].exp}),{n:0,inv:0,paid:0,exp:0});
+    return `<div class="card"><h3>${y} — full year summary</h3><div class="tablewrap"><table><tbody>${block(T)}</tbody></table></div></div>`+
+      ks.map(k=>{ const m=M[k], cats=Object.entries(m.cats).sort((a,b)=>b[1]-a[1]);
+        return `<div class="card"><h3>${monthName(k)}</h3><div class="tablewrap"><table><tbody>${block(m)}</tbody></table></div>`+
+          (cats.length?`<div style="margin-top:10px;font-size:13px;color:var(--ink-dim)"><b>Expenses by category</b></div><div class="tablewrap"><table><tbody>${cats.map(([c,a])=>row(escapeHtml(c),fmt(a))).join('')}</tbody></table></div>`:'')+`</div>`; }).join('');
+  }).join('');
   main.innerHTML=`
-  <header class="top"><div><h1>Reports</h1><div style="color:var(--ink-dim);font-size:13px">Auto-calculated from your bookings, invoices and expenses.</div></div></header>
-  <div class="card"><h3>Monthly income vs. expenses</h3><div class="tablewrap">
-  ${monthKeys.length?`<table><thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th></tr></thead><tbody>
-  ${monthKeys.map(mk=>{ const inc=months[mk]||0; const exp=months[mk+'_exp']||0; return `<tr><td>${mk}</td><td class="mono">${fmt(inc)}</td><td class="mono">${fmt(exp)}</td><td class="mono" style="color:${inc-exp>=0?'var(--good)':'var(--bad)'}">${fmt(inc-exp)}</td></tr>`; }).join('')}
-  </tbody></table>`:'<div class="empty">Add invoices and expenses to see monthly reports.</div>'}
-  </div></div>
+  <header class="top"><div><h1>Reports</h1><div style="color:var(--ink-dim);font-size:13px">Month-by-month summary, newest first. Calculated from your invoices and expenses.</div></div></header>
+  ${body||'<div class="card"><div class="empty">Add invoices and expenses to see monthly reports.</div></div>'}
   <div class="card"><h3>Weekly sales (from invoices)</h3><div class="tablewrap">
   ${Object.keys(weeks).length? `<table><thead><tr><th>Week starting</th><th>Invoices</th><th>Total</th></tr></thead><tbody>
-  ${Object.entries(weeks).sort((a,b)=>a[0].localeCompare(b[0])).map(([wk,v])=>`<tr><td>${wk}</td><td>${v.count}</td><td class="mono">${fmt(v.income)}</td></tr>`).join('')}
+  ${Object.entries(weeks).sort((a,b)=>b[0].localeCompare(a[0])).map(([wk,v])=>`<tr><td>${wk}</td><td>${v.count}</td><td class="mono">${fmt(v.income)}</td></tr>`).join('')}
   </tbody></table>` : '<div class="empty">No invoices yet.</div>'}
   </div></div>`;
 }
