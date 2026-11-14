@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<!-- saved from url=(0065)file:///C:/Users/KielTec/Downloads/kieltec%20second.html#invoices -->
 <html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Kieltec — Workshop Manager</title>
 <link rel="preconnect" href="https://fonts.googleapis.com/">
-<link href="./Kieltec — Workshop Manager_files/css2" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
 :root{
   --bg:#F3F1EC; --bg-alt:#E7E3D9; --panel:#FFFFFF; --ink:#1B1E20; --ink-dim:#5B6266;
@@ -248,15 +248,14 @@ function showLogin(msg){
   o.textContent=msg;
 }
 async function claimNo(kind){
-  const lock=dbh.doc('locks/'+kind);
-  for(let t=0;t<10;t++){
-    const a=await lock.acquire({holder:HOLDER,ttlMs:4000});
-    if(a.acquired){ const c=dbh.doc('counters/'+kind); const sn=await c.get(); const n=((sn.exists&&sn.data().last)||0)+1; await c.set({last:n}); return n; }
-    await new Promise(r=>setTimeout(r,400));
-  }
-  throw new Error('busy');
+  const {data,error}=await sb.rpc('next_number',{k:kind});
+  if(error) throw error;
+  return data;
 }
-async function bumpCounter(kind,n){ const c=dbh.doc('counters/'+kind); const sn=await c.get(); await c.set({last:Math.max(n,(sn.exists&&sn.data().last)||0)}); }
+async function bumpCounter(kind,n){
+  const {error}=await sb.rpc('bump_counter',{k:kind,n:n});
+  if(error) throw error;
+}
 let pushing=false, again=false;
 async function push(){
   if(!dbh) return;
@@ -280,7 +279,7 @@ async function push(){
   }catch(e){ setStatus('err'); }
   finally{ pushing=false; }
 }
-async function pull(){}
+async function pull(){ if(window.__poll) await window.__poll(); }
 let snapFirst=true;
 function applySnap(snap){
   let changed=false;
@@ -1060,11 +1059,99 @@ function renderSettings(main){
   };
 }
 
+/* ---------- Supabase connection ---------- */
+const SUPABASE_URL='PASTE_YOUR_SUPABASE_URL_HERE';
+const SUPABASE_ANON_KEY='PASTE_YOUR_ANON_PUBLIC_KEY_HERE';
+let sb=null;
+
+function makeDb(){
+  return {
+    doc(path){
+      const id=path.split('/')[1];
+      return {
+        async set(v){ const {error}=await sb.from('records').upsert({id,kind:v.kind,data:v.data,deleted:false}); if(error) throw error; },
+        async delete(){ const {error}=await sb.from('records').update({deleted:true}).eq('id',id); if(error) throw error; }
+      };
+    },
+    collection(){
+      return {
+        onSnapshot(cb,errCb){
+          let first=true, cur='1970-01-01T00:00:00Z', busy=false;
+          async function poll(){
+            if(busy) return; busy=true;
+            try{
+              let rows=[], from=0;
+              for(;;){
+                const {data,error}=await sb.from('records').select('id,kind,data,deleted,updated_at')
+                  .gt('updated_at',cur).order('updated_at',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
+                if(error) throw error;
+                rows=rows.concat(data);
+                if(data.length<1000) break; from+=1000;
+              }
+              if(rows.length) cur=rows[rows.length-1].updated_at;
+              if(!rows.length && !first){ setStatus('ok'); return; }
+              const changes=[];
+              rows.forEach(r=>{
+                if(first && r.deleted) return;
+                changes.push({type:r.deleted?'removed':(first?'added':'modified'), doc:{id:r.id, data:()=>({kind:r.kind,data:r.data})}});
+              });
+              const wasFirst=first; first=false;
+              cb({docChanges:()=>changes, docs:changes.filter(c=>c.type!=='removed').map(c=>c.doc), wasFirst});
+            }catch(e){ if(errCb) errCb(e); }
+            finally{ busy=false; }
+          }
+          window.__poll=poll;
+          poll();
+          setInterval(poll,8000);
+          window.addEventListener('online',poll);
+          document.addEventListener('visibilitychange',()=>{ if(!document.hidden) poll(); });
+        }
+      };
+    }
+  };
+}
+function makeAssets(){
+  return {
+    async upload(blob){
+      const ext=(blob.type||'').includes('png')?'png':'jpg';
+      const path=uid()+Math.random().toString(36).slice(2,6)+'.'+ext;
+      const {error}=await sb.storage.from('photos').upload(path,blob,{contentType:blob.type||'image/jpeg'});
+      if(error) throw error;
+      return {url:sb.storage.from('photos').getPublicUrl(path).data.publicUrl};
+    }
+  };
+}
+function askLogin(){
+  return new Promise(resolve=>{
+    let o=document.getElementById('loginov');
+    if(!o){ o=document.createElement('div'); o.id='loginov'; document.body.appendChild(o); }
+    o.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg,#fff);color:var(--ink,#111);display:flex;align-items:center;justify-content:center;padding:24px';
+    o.innerHTML='<div style="max-width:340px;width:100%"><h2 style="margin-bottom:12px">Kieltec — sign in</h2>'
+      +'<div class="field"><label>Email</label><input id="liEmail" type="email" autocomplete="username"></div>'
+      +'<div class="field" style="margin-top:8px"><label>Password</label><input id="liPass" type="password" autocomplete="current-password"></div>'
+      +'<div id="liErr" style="color:var(--bad,#b00020);font-size:13px;min-height:20px;margin-top:8px"></div>'
+      +'<button class="btn" id="liGo" style="width:100%;margin-top:6px">Sign in</button></div>';
+    const go=async()=>{
+      const email=document.getElementById('liEmail').value.trim(), password=document.getElementById('liPass').value;
+      document.getElementById('liErr').textContent='Signing in…';
+      const {error}=await sb.auth.signInWithPassword({email,password});
+      if(error){ document.getElementById('liErr').textContent=error.message; return; }
+      o.remove(); resolve();
+    };
+    document.getElementById('liGo').onclick=go;
+    document.getElementById('liPass').onkeydown=e=>{ if(e.key==='Enter') go(); };
+  });
+}
 render();
 (async function boot(){
-  try{ dbh=await claude.use('db'); }catch(e){}
-  try{ assetsH=await claude.use('assets'); }catch(e){}
-  if(!dbh){ showLogin('The shared database is not available. Open this page while signed in to claude.ai.'); return; }
+  if(!window.supabase || SUPABASE_URL.indexOf('PASTE_')===0 || SUPABASE_ANON_KEY.indexOf('PASTE_')===0){
+    showLogin('Setup needed: open index.html and fill in SUPABASE_URL and SUPABASE_ANON_KEY (Supabase → Project Settings → API).'); return;
+  }
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+  let session=null;
+  try{ session=(await sb.auth.getSession()).data.session; }catch(e){}
+  if(!session) await askLogin();
+  dbh=makeDb(); assetsH=makeAssets();
   await startSync(); await push();
 })();
 </script>
